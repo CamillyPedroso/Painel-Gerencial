@@ -1011,7 +1011,8 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&MS_ON)msFechar(fals
 
 /* ================= FILTROS ================= */
 const DIM_LBL={grpRep:'Grupo de repav',grpOrig:'Grupo serv. origem',mat:'Matrícula',grupo:'Grupo de serviço',pav:'Pavimento',recurso:'Equipe',dir:'Diretoria',macro:'Macro',micro:'Micro',cid:'Cidade',servNome:'Serviço',resp:'Responsável',afeta:'Afeta cliente'};
-function filtroBk(r){return inSel(F.afeta,r.afeta)&&inSel(F.resp,r.resp)&&inSel(F.grupo,r.grupo)&&inSel(F.dir,r.dir)&&chipOk(r,CHIPS_ALL.backlog);}
+const FORA_META_BK=new Set(['102001','218068','235009','238007']); // não contam para a meta do backlog
+function filtroBk(r){return !FORA_META_BK.has(r.cod)&&inSel(F.afeta,r.afeta)&&inSel(F.resp,r.resp)&&inSel(F.grupo,r.grupo)&&inSel(F.dir,r.dir)&&chipOk(r,CHIPS_ALL.backlog);}
 /* não agendadas (foto do momento, sem data) · tira as que já aparecem concluídas/canceladas nas extrações */
 function baseNA(){return NA.filter(r=>!IDS_FIM.has(String(r.id))&&filtroBk(r));}
 function baseFiltrada(){
