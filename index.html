@@ -573,7 +573,7 @@ const COLS = {
   c3:'MA_3 Comprimento Da Vala (M)', l3:'MA_3 Largura Da Vala (M)', m3:'MA_Metragem (m²) Vala 3',
   c4:'MA_4 Comprimento Da Vala (M)', l4:'MA_4 Largura Da Vala (M)', m4:'MA_Metragem (m²) Vala 4',
   c5:'MA_5 Comprimento Da Vala (M)', l5:'MA_5 Largura Da Vala (M)', m5:'MA_Metragem (m²) Vala 5',
-  mat:'Matrícula', setor:'Setor', impM:'Imp_Metragem (m²)',   mat:'Matrícula', setor:'Setor', impM:'Imp_Metragem (m²)', rap:'Resposta Adicional Posterior JSON', deb:'Valor Total dos Débitos'
+  mat:'Matrícula', setor:'Setor', impM:'Imp_Metragem (m²)', rap:'Resposta Adicional Posterior JSON', deb:'Valor Total dos Débitos'
 };
 const META = {backlog:0.95};
 
@@ -585,7 +585,7 @@ let SESS=null, IDX=null, NA=[], NA_INFO=null, IDS_FIM=new Set();
 const LD=new Map(); // dia -> {ver, itens:[{arquivo, rows}]}
 const ONLINE=()=>!!API_URL;
 const ADMIN=()=>!ONLINE()||(!!SESS&&SESS.perfil==='admin');
-const PACK_KEYS=()=>Object.keys(COLS).filter(k=>!['parecer','posterior','adicional','end','bairro'].includes(k));
+const PACK_KEYS=()=>Object.keys(COLS).filter(k=>!['parecer','posterior','adicional','bairro'].includes(k));
 
 /* ================= ESTADO ================= */
 let ROWS = [];
@@ -782,7 +782,7 @@ function diasDoPeriodo(){return diasBase().filter(d=>(!PER.de||d>=PER.de)&&(!PER
 async function carregarDias(lista,silencioso){
   for(const d of [...LD.keys()])if(!lista.includes(d)||!IDX.dias.some(x=>x.dia===d))LD.delete(d); // libera memória do que saiu do período
   const falta=lista.filter(d=>!LD.has(d)||LD.get(d).ver!==verDia(d));
-  if(!falta.length){montarRows();return true;}
+  if(!falta.length){montarRows();await garantirOrigens();return true;}
   if(!silencioso&&falta.length>45&&!confirm('Vou carregar '+falta.length+' dias do banco. Pode demorar alguns minutos na primeira vez. Continuar?'))return false;
   let feito=0;prog(0,falta.length,'Carregando dias do banco… 0/'+falta.length);
   const fila=falta.slice(),erros=[];
@@ -795,8 +795,31 @@ async function carregarDias(lista,silencioso){
     prog(++feito,falta.length,'Carregando dias do banco… '+feito+'/'+falta.length);}};
   await Promise.all([worker(),worker(),worker()]);
   montarRows();prog(-1);
+  await garantirOrigens();
   if(erros.length)alert('Alguns dias não carregaram:\n'+erros.slice(0,5).join('\n'));
   return true;
+}
+/* índice de origens: Cód. Protocolo Origem → serviço, de TODOS os dias do banco até o fim do período
+   (a OS de origem quase sempre foi feita dias antes da repavimentação, fora do período filtrado) */
+let ORIG=new Map();
+function idxOrig(rows){const RS=repavSet(),m=[];for(const o of rows){const p=o.prot==null?'':String(o.prot).replace(/\.0+$/,'').trim();if(!p)continue;const c=(String(o.serv??'').match(/^\s*(\d{5,7})/)||[])[1]||'';if(RS.has(c))continue;m.push([p,c,String(o.serv??'').replace(/^\s*\d+\s*-\s*/,'').trim()]);}return m;}
+async function garantirOrigens(){
+  if(!ONLINE()||!IDX)return;
+  const ate=PER.ate||'';
+  const dias=[...new Set(IDX.dias.map(x=>x.dia))].filter(d=>!ate||d<=ate).sort().slice(-180);
+  const IX=new Map(),falta=[];
+  for(const d of dias){const v=verDia(d);const c=await IDB.get('o:'+d);if(c&&c.ver===v){IX.set(d,c.m);continue;}
+    if(LD.has(d)&&LD.get(d).ver===v){const m=idxOrig(LD.get(d).itens.flatMap(it=>it.rows));IX.set(d,m);await IDB.set('o:'+d,{ver:v,m});}else falta.push(d);}
+  if(falta.length){let feito=0;const fila=falta.slice();prog(0,falta.length,'Buscando as OS de origem das repavimentações… 0/'+falta.length);
+    const worker=async()=>{while(fila.length){const d=fila.shift(),v=verDia(d);
+      try{let c=await IDB.get('d:'+d);if(!c||c.ver!==v){const j=await api('dia',{dia:d});c={ver:v,itens:j.itens||[]};await IDB.set('d:'+d,c);}
+        const rows=[];for(const it of c.itens)rows.push(...unpack(await gunz(it.dados)));
+        const m=idxOrig(rows);IX.set(d,m);await IDB.set('o:'+d,{ver:v,m});}catch(e){}
+      prog(++feito,falta.length,'Buscando as OS de origem das repavimentações… '+feito+'/'+falta.length);}};
+    await Promise.all([worker(),worker(),worker()]);prog(-1);}
+  ORIG=new Map();
+  for(const d of [...IX.keys()].sort())for(const [p,c,n] of IX.get(d))ORIG.set(p,{cod:c,servNome:n||'(sem serviço)',grpOrig:grpOrigDe(c)});
+  VALAS_CACHE=null;
 }
 function montarRows(){const m=new Map();for(const d of [...LD.keys()].sort())for(const it of LD.get(d).itens)for(const r of it.rows){r._f=it.arquivo;m.set(String(r.id),r);}ROWS=[...m.values()];VALAS_CACHE=null;}
 async function carregarNA(){
@@ -1290,7 +1313,7 @@ function extrairValas(){
   for(const o of ROWS)if(!repavSet().has(o.cod)&&o.prot!=null&&o.prot!=='')porProt.set(String(o.prot),o);
   for(const o of ROWS){
     if(!RS.has(o.cod)||o.status!=='Finalizada')continue;
-    const og=porProt.get(String(o.prot??'')),ori=/a partir da/i.test(String(o.obs||''))?'A partir de outra OS':'Repav direta';
+    const og=porProt.get(String(o.prot??''))||ORIG.get(String(o.prot??'').replace(/\.0+$/,'').trim()),ori=/a partir da/i.test(String(o.obs||''))?'A partir de outra OS':'Repav direta';
     valasMA(o).forEach(x=>V.push({o,og,origem:ori,repCod:o.cod,repav:o.servNome,pav:tipoPav(o.servNome),...x,est:false}));
   }
   V.forEach(v=>{v.dia=v.o.dia;v.dir=v.o.dir;v.macro=v.o.macro;v.micro=v.o.micro;v.cid=v.o.cid;v.servNome=v.og?v.og.servNome:'(origem fora da base)';v.recurso=String(v.o.recurso??'');v.fora=v.m2>META_VALA;v.mat=semMat(v.o)?'Sem matrícula':'Com matrícula';v.grpOrig=v.og?v.og.grpOrig:'SEM ORIGEM NA BASE';v.grpRep=grpRepDe(v.repCod,v.repav);});
