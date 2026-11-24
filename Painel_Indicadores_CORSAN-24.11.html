@@ -576,7 +576,7 @@ const META = {backlog:0.95};
 /* ================= BANCO ONLINE (Apps Script + Google Sheets) =================
    Cole aqui a URL do App da Web do Apps Script (termina em /exec).
    Vazio = modo local: sem login, a base fica só neste navegador. */
-const API_URL = '';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxVjUJQ032Q-C7s9w3LPcJw4vUbkznbm0rGJf5EDuJKZvEJgyKjgZS0sIow0bFBY42W/exec';
 let SESS=null, IDX=null, NA=[], NA_INFO=null, IDS_FIM=new Set();
 const LD=new Map(); // dia -> {ver, itens:[{arquivo, rows}]}
 const ONLINE=()=>!!API_URL;
