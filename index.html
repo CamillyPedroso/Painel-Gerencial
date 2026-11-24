@@ -1260,7 +1260,7 @@ function exportarOS(){
    ===================================================================== */
 const META_VALA=3, VALA_FAIXAS=[[0,1,'até 1'],[1,2,'1–2'],[2,3,'2–3'],[3,5,'3–5'],[5,10,'5–10'],[10,1e9,'> 10']];
 let SIT_V='';
-const fvPadrao=()=>({dir:[],origem:[],pav:[],mat:[],grpRep:[],grpOrig:[]});
+const fvPadrao=()=>({dir:[],origem:[],pav:[],mat:[],grpRep:[],grpOrig:[],gr:'inc'});
 let FV=fvPadrao(), CAM_V='dms', PAR_V='micro', TOL_V=0.10;
 const num=v=>{if(v==null||v==='')return null;const n=parseFloat(String(v).replace(',','.'));return isFinite(n)?n:null;};
 let RS_MEMO=null;
@@ -1275,27 +1275,21 @@ function nValTexto(t){let n=0;for(const m of String(t||'').matchAll(/Espessura V
 function valasMA(o){const out=[];[['c1','l1','m1'],['c2','l2','m2'],['c3','l3','m3'],['c4','l4','m4'],['c5','l5','m5']].forEach(([c,l,m],i)=>{
   const C=num(o[c]),L=num(o[l]),M=num(o[m]);const a=(C&&L)?C*L:M;if(a)out.push({n:i+1,comp:C,larg:L,m2:a});});return out;}
 
+/* REGRA IGUAL AO BI ("Média de vala", nov/2026):
+   - universo: OS EXECUTADAS (Finalizada) cujo serviço é um dos 26 códigos de repav (tabela Códigos Repav)
+   - m² de cada vala = comprimento × largura (formulário MA_, Vala 1…5)
+   - valor da OS = média das valas dela · indicador = média entre as OS (OS sem medida fica fora, como no AVERAGEX)
+   - grupo do serviço de origem: OS de outro serviço com o mesmo Cód. Protocolo Origem na base */
+function codsRepavMeta(){const k=Object.keys(AUX.grpRep||{});return k.length?new Set(k):repavSet();}
 function extrairValas(){
-  const RS=repavSet(),V=[];
+  const RS=codsRepavMeta(),V=[],porProt=new Map();
+  for(const o of ROWS)if(!repavSet().has(o.cod)&&o.prot!=null&&o.prot!=='')porProt.set(String(o.prot),o);
   for(const o of ROWS){
-    // 1) posterior
-    if(o.rap){let d=null;try{d=JSON.parse(o.rap);}catch(e){}
-      if(d)for(const v of Object.values(d)){const cad=String(v.cadServicoDefinicao??'');if(!RS.has(cad))continue;
-        const rn=AUX.serv[cad]?AUX.serv[cad][0]:cad;let achou=0;
-        ['','2','3','4','5'].forEach((s,i)=>{const C=num(v['comprimento'+s]),L=num(v['largura'+s]),M=num(v['metragem'+s]);const a=(C&&L)?C*L:M;
-          if(a){achou++;V.push({o,origem:'Posterior',repCod:cad,repav:rn,pav:tipoPav(rn),n:i+1,comp:C,larg:L,m2:a,est:false});}});
-        if(!achou){const tot=metrTexto(v.dsParecer),q=+v.quantidadeValas||nValTexto(v.dsParecer)||1;
-          if(tot)for(let i=0;i<q;i++)V.push({o,origem:'Posterior',repCod:cad,repav:rn,pav:tipoPav(rn),n:i+1,comp:null,larg:null,m2:tot/q,est:true});}
-      }
-    }
-    // 2) repav original (aberta direto como repav)
-    if(RS.has(o.cod)&&o.status!=='Cancelada'&&!/a partir da/i.test(String(o.obs||''))){
-      const ma=valasMA(o);
-      if(ma.length)ma.forEach(x=>V.push({o,origem:'Repav original',repCod:o.cod,repav:o.servNome,pav:tipoPav(o.servNome),...x,est:false}));
-      else{const tot=metrTexto(o.obs),q=nValTexto(o.obs)||1;if(tot)for(let i=0;i<q;i++)V.push({o,origem:'Repav original',repCod:o.cod,repav:o.servNome,pav:tipoPav(o.servNome),n:i+1,comp:null,larg:null,m2:tot/q,est:true});}
-    }
+    if(!RS.has(o.cod)||o.status!=='Finalizada')continue;
+    const og=porProt.get(String(o.prot??'')),ori=/a partir da/i.test(String(o.obs||''))?'A partir de outra OS':'Repav direta';
+    valasMA(o).forEach(x=>V.push({o,og,origem:ori,repCod:o.cod,repav:o.servNome,pav:tipoPav(o.servNome),...x,est:false}));
   }
-  V.forEach(v=>{v.dia=v.o.dia;v.dir=v.o.dir;v.macro=v.o.macro;v.micro=v.o.micro;v.cid=v.o.cid;v.servNome=v.o.servNome;v.recurso=String(v.o.recurso??'');v.fora=v.m2>META_VALA;v.mat=semMat(v.o)?'Sem matrícula':'Com matrícula';v.grpOrig=v.o.grpOrig;v.grpRep=grpRepDe(v.repCod,v.repav);});
+  V.forEach(v=>{v.dia=v.o.dia;v.dir=v.o.dir;v.macro=v.o.macro;v.micro=v.o.micro;v.cid=v.o.cid;v.servNome=v.og?v.og.servNome:'(origem fora da base)';v.recurso=String(v.o.recurso??'');v.fora=v.m2>META_VALA;v.mat=semMat(v.o)?'Sem matrícula':'Com matrícula';v.grpOrig=v.og?v.og.grpOrig:'SEM ORIGEM NA BASE';v.grpRep=grpRepDe(v.repCod,v.repav);});
   return V;
 }
 function conferencia(){
@@ -1323,7 +1317,8 @@ function porOS(V){
 }
 function valasFiltradas(){
   if(!VALAS_CACHE)VALAS_CACHE=extrairValas();
-  return VALAS_CACHE.filter(v=>noPer(v.dia)&&inSel(FV.dir,v.dir)&&inSel(FV.origem,v.origem)&&inSel(FV.pav,v.pav)&&inSel(FV.mat,v.mat)
+  const gr=FV.gr==='exc'?new Set(VALAS_CACHE.filter(v=>v.m2>50).map(v=>String(v.o.id))):null; // OS com vala > 50 m² (provável erro de digitação)
+  return VALAS_CACHE.filter(v=>(!gr||!gr.has(String(v.o.id)))&&noPer(v.dia)&&inSel(FV.dir,v.dir)&&inSel(FV.origem,v.origem)&&inSel(FV.pav,v.pav)&&inSel(FV.mat,v.mat)
     &&inSel(FV.grpRep,v.grpRep)&&inSel(FV.grpOrig,v.grpOrig)&&chipOk(v));
 }
 /* repavimentação NÃO AGENDADA (base de não agendado · serviços de repav) */
@@ -1346,7 +1341,8 @@ function renderVala(M){
     ${msHTML('vDir','Diretoria',uv('dir'),FV.dir,v=>{FV.dir=v;render();})}
     ${msHTML('vGrep','Grupo de repav',uv('grpRep'),FV.grpRep,v=>{FV.grpRep=v;render();})}
     ${msHTML('vGori','Grupo do serviço de origem',uv('grpOrig'),FV.grpOrig,v=>{FV.grpOrig=v;render();})}
-    ${msHTML('vOri','Origem da repav',['Posterior','Repav original'],FV.origem,v=>{FV.origem=v;render();})}
+    ${msHTML('vOri','Origem da repav',['Repav direta','A partir de outra OS'],FV.origem,v=>{FV.origem=v;render();})}
+    <label class="fld"><span>OS com vala &gt; 50 m²</span><select id="vGr"><option value="inc" ${FV.gr!=='exc'?'selected':''}>Incluir (igual ao BI)</option><option value="exc" ${FV.gr==='exc'?'selected':''}>Excluir da média</option></select></label>
     ${msHTML('vPav','Pavimento',uv('pav'),FV.pav,v=>{FV.pav=v;render();})}
     ${msHTML('vMat','Matrícula',['Com matrícula','Sem matrícula'],FV.mat,v=>{FV.mat=v;render();})}
     <span class="sp"></span>
@@ -1392,6 +1388,7 @@ function renderVala(M){
   </div>`}
   <div class="pn fade" id="confV"></div>`;
   const on=(id,k)=>{const e=document.getElementById(id);if(e)e.onchange=ev=>{FV[k]=ev.target.value;render();};};
+  document.getElementById('vGr').onchange=e=>{FV.gr=e.target.value;render();};
   const avv=document.getElementById('avNAv');if(avv)avv.onclick=()=>abrirOS(naRepav().filter(o=>o.venc),'REPAVIMENTAÇÃO não agendada já fora do SLA');
   const knv=document.getElementById('kNAv');if(knv)knv.onclick=()=>{if(NA.length)abrirOS(naRepav(),'Repavimentação não agendada');else abrirBases();};
   M.querySelectorAll('[data-av]').forEach(b=>b.onclick=()=>{try{const U=porOS(valasFiltradas());const f={susp:[u=>u.valas.some(x=>x.m2>50),'OS com vala acima de 50 m² — conferir digitação'],est:[u=>u.est,'OS sem medida por vala (estimadas)'],mat:[u=>u.mat==='Sem matrícula','OS de repavimentação sem matrícula']}[b.dataset.av];abrirValas(U.filter(f[0]),f[1]);}catch(err){alert('Erro ao abrir a lista: '+err.message);}});
