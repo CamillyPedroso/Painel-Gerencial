@@ -345,6 +345,10 @@ svg text{font-family:'DM Sans',Arial,sans-serif}
 /* ===== multi-seleção ===== */
 .ms{position:relative}
 .toolbar{position:relative;z-index:30}
+table.os th,table.tree th{cursor:pointer;user-select:none;transition:color .15s}
+table.os th:hover,table.tree th:hover{color:var(--mar)}
+th.so-a,th.so-d{color:var(--mar)!important}
+th.so-a::after{content:" ▲";font-size:9px}th.so-d::after{content:" ▼";font-size:9px}
 .ms-b{display:flex;align-items:center;gap:6px;border:none;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--c4);padding:2px 0;cursor:pointer;min-width:96px;max-width:200px;text-align:left}
 .fld .ms-b span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:inherit;letter-spacing:0}
 .fld .ms-p input{min-width:0;padding:0;cursor:text}
@@ -1131,7 +1135,7 @@ function grupos(rows,k){
   return [...m.entries()].map(([v,rs])=>({v,rs,a:agrega(rs)})).sort((x,y)=>y.a.f-x.a.f||x.a.p-y.a.p);
 }
 function desenhaArvore(B){
-  NODES={};const lv=CAMINHOS[CAMINHO];const totF=agrega(B).f||1;
+  NODES={};LAST_T.tree=B;const lv=CAMINHOS[CAMINHO];const totF=agrega(B).f||1;
   const t=document.getElementById('tree');
   t.innerHTML=`<thead><tr><th>${lv.map(k=>DIM_LBL[k]).join(' › ')}</th><th>OS</th><th>Fora</th><th>Não ag. venc.</th><th>% no prazo</th><th>Falta p/ meta</th><th>% dos atrasos</th><th></th></tr></thead><tbody></tbody>`;
   const tb=t.querySelector('tbody');
@@ -1155,11 +1159,11 @@ function desenhaArvore(B){
     const n=NODES[id],tr=tb.querySelector(`tr[data-id="${id}"]`);
     if(n.aberto){fecharFilhos(id);n.aberto=false;tr.classList.remove('open');return;}
     n.aberto=true;tr.classList.add('open');
-    const filhos=grupos(n.g.rs,lv[n.nivel+1]);let ref=tr;
+    const filhos=ordT('tree',grupos(n.g.rs,lv[n.nivel+1]));let ref=tr;
     filhos.forEach(f=>{const l=linha(f,n.nivel+1,n.path.concat([[lv[n.nivel],n.g.v]]),id);l.classList.add('fade');ref.after(l);ref=l;});
   };
   const fecharFilhos=id=>{tb.querySelectorAll(`tr[data-pai="${id}"]`).forEach(c=>{fecharFilhos(c.dataset.id);c.remove();});};
-  grupos(B,lv[0]).forEach(g=>tb.appendChild(linha(g,0,[],null)));
+  ordT('tree',grupos(B,lv[0])).forEach(g=>tb.appendChild(linha(g,0,[],null)));marcaTh(t,TSORT.tree);
 }
 
 /* ---------- PARETO ---------- */
@@ -1404,7 +1408,7 @@ const CAMINHOS_V={rdm:['grpRep','dir','micro'],odm:['grpOrig','dir','micro'],dmo
 function gruposV(vs,k){const m=new Map();for(const v of vs){const x=v[k]||'–';if(!m.has(x))m.set(x,[]);m.get(x).push(v);}
   return [...m.entries()].map(([v,rs])=>({v,rs,a:agV(rs)})).sort((x,y)=>y.a.f-x.a.f||y.a.media-x.a.media);}
 function desenhaArvoreV(V){
-  const lv=CAMINHOS_V[CAM_V],totF=agV(V).f||1,t=document.getElementById('treeV');let cnt=0;
+  LAST_T.treeV=V;const lv=CAMINHOS_V[CAM_V],totF=agV(V).f||1,t=document.getElementById('treeV');let cnt=0;
   t.innerHTML=`<thead><tr><th>${lv.map(k=>DIM_LBL[k]).join(' › ')}</th><th>OS</th><th>Média m²</th><th>> ${META_VALA} m²</th><th>m² excedente</th><th>% das fora</th><th></th></tr></thead><tbody></tbody>`;
   const tb=t.querySelector('tbody'),N={};
   const linha=(g,nivel,path,pai)=>{
@@ -1420,10 +1424,10 @@ function desenhaArvoreV(V){
     tr.onclick=()=>{if(!temFilho)return;const n=N[id];
       if(n.aberto){fech(id);n.aberto=false;tr.classList.remove('open');return;}
       n.aberto=true;tr.classList.add('open');let ref=tr;
-      gruposV(g.rs,lv[nivel+1]).forEach(f=>{const l=linha(f,nivel+1,cam,id);l.classList.add('fade');ref.after(l);ref=l;});};
+      ordT('treeV',gruposV(g.rs,lv[nivel+1])).forEach(f=>{const l=linha(f,nivel+1,cam,id);l.classList.add('fade');ref.after(l);ref=l;});};
     return tr;};
   const fech=id=>tb.querySelectorAll(`tr[data-pai="${id}"]`).forEach(c=>{fech(c.dataset.id);c.remove();});
-  gruposV(V,lv[0]).forEach(g=>tb.appendChild(linha(g,0,[],null)));
+  ordT('treeV',gruposV(V,lv[0])).forEach(g=>tb.appendChild(linha(g,0,[],null)));marcaTh(t,TSORT.treeV);
 }
 
 /* ---------- pareto ---------- */
@@ -1660,6 +1664,29 @@ function abrirOSProd(rs,tit){
     L.map(o=>`<tr><td><b>${matCel(o)}</b></td><td>${esc(o.prot)}</td><td>${esc(o.serv)}</td><td>${tag(o)}</td><td>${esc(o.dir)}</td><td>${esc(o.micro)}</td><td>${esc(o.cid)}</td><td>${fmtD(o.dia)}</td><td>${esc(o.ini??'')}</td><td>${esc(o.fim??'')}</td></tr>`).join('')}</tbody></table>`;
   document.getElementById('mOS').classList.add('on');
 }
+
+/* ================= ORDENAR TABELAS (clique no cabeçalho · 1º clique = maior primeiro · 2º = menor primeiro) ================= */
+const TSORT={tree:null,treeV:null}, LAST_T={};
+const ACC={tree:[g=>String(g.v),g=>g.a.t,g=>g.a.f,g=>g.a.na,g=>g.a.p,g=>gapMeta(g.a,META.backlog),g=>g.a.f],
+           treeV:[g=>String(g.v),g=>g.a.n,g=>g.a.media,g=>g.a.f,g=>g.a.ex,g=>g.a.f]};
+function cmpVal(a,b,d){const ta=a==null?2:typeof a==='number'?0:1,tb=b==null?2:typeof b==='number'?0:1;if(ta!==tb)return ta-tb;if(ta===2)return 0;
+  return (ta===0?a-b:String(a).localeCompare(String(b),'pt',{numeric:true}))*(d==='a'?1:-1);}
+function ordT(id,arr){const S=TSORT[id];if(!S||!ACC[id][S.i])return arr;const f=ACC[id][S.i];return arr.slice().sort((x,y)=>cmpVal(f(x),f(y),S.d));}
+function marcaTh(t,S){t.querySelectorAll('th').forEach((th,i)=>{th.classList.remove('so-a','so-d');if(S&&S.i===i)th.classList.add(S.d==='a'?'so-a':'so-d');});}
+function valCel(td){let t=td.textContent.replace(/\s+/g,' ').trim();if(!t||/^[–—-]$/.test(t))return null;
+  let m=t.match(/^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}):(\d{2}))?/);if(m)return +new Date(+m[3],m[2]-1,+m[1],+(m[4]||0),+(m[5]||0));
+  m=t.match(/^([+-]?[\d.]*\d(?:,\d+)?)\s*(h|d)$/);if(m){const n=+m[1].replace(/\./g,'').replace(',','.');return m[2]==='d'?n*24:n;}
+  const n=t.replace(/%|m²|\*/g,'').trim();if(/^[+-]?[\d.]*\d(,\d+)?$/.test(n))return +n.replace(/\./g,'').replace(',','.');
+  return t.toUpperCase();}
+document.addEventListener('click',e=>{
+  const th=e.target.closest('table.os th,table.tree th');if(!th)return;
+  const t=th.closest('table'),i=th.cellIndex;
+  if(t.classList.contains('tree')){const id=t.id;if(!ACC[id]||!ACC[id][i])return;const S=TSORT[id];TSORT[id]={i,d:S&&S.i===i&&S.d==='d'?'a':'d'};
+    if(id==='tree')desenhaArvore(LAST_T.tree);else desenhaArvoreV(LAST_T.treeV);return;}
+  const tb=t.tBodies[0];if(!tb)return;const d=th.classList.contains('so-d')?'a':'d';
+  const rows=[...tb.rows].map(r=>({r,v:r.cells[i]?valCel(r.cells[i]):null}));
+  rows.sort((x,y)=>cmpVal(x.v,y.v,d));rows.forEach(x=>tb.appendChild(x.r));marcaTh(t,{i,d});
+});
 
 /* ================= ABAS ================= */
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ABA=b.dataset.t;render();});
